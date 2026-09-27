@@ -1,0 +1,205 @@
+# Moodle 5.2 -> OpenTelemetry -> OpenSearch, on one laptop.
+#
+# Start:   docker compose up --build       (first run builds the Moodle image: 5-10 min)
+# Moodle:  https://localhost               admin / DemoAdmin2026!
+# Search:  https://localhost:5601          OpenSearch Dashboards, admin / DemoSearch2026!
+# Stop:    docker compose down             (add -v to delete the data too)
+#
+# This is the chain from the talk, component by component:
+#   1-4  moodle        Moodle 5.2 + ext-opentelemetry + the two Composer packages
+#   5    otelcol       the OpenTelemetry Collector (contrib build)
+#   6    opensearch    the store, plus opensearch-dashboards for the screens
+# mariadb is Moodle's database, moodle-cron runs Moodle cron every minute,
+# moodle-init installs the database once, certs makes the self-signed
+# certificates once, opensearch-init creates the collector's user once,
+# dashboards-init loads the "Moodle events" dashboard into Dashboards once.
+#
+# Moodle, OpenSearch and OpenSearch Dashboards all serve https with the same
+# self-signed certificate (Moodle on 443, OpenSearch on 9200, Dashboards on
+# 5601). OpenSearch runs with its security plugin on: password login for every user, and a
+# separate user for the collector with write rights only. The passwords
+# are in these files and in README.md, and every trace is kept: that is
+# what makes this a demo. Ports are bound to 127.0.0.1 only.
+
+name: moodle-otel-demo
+
+x-moodle-image: &moodle-image
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: moodle-otel-demo:local
+
+# The six settings from the talk (step 4). There is no sampler setting:
+# moodle-package-otel 1.0.1 hard-codes an always-on sampler
+# (src/Instrumentation/MoodleInstrumentation.php:374) and ignores
+# OTEL_TRACES_SAMPLER, so every request is traced.
+x-otel-env: &otel-env
+  OTEL_PHP_AUTOLOAD_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otelcol:4318"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+  OTEL_TRACES_EXPORTER: "otlp"
+  OTEL_LOGS_EXPORTER: "otlp"
+  OTEL_METRICS_EXPORTER: "none"
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-file-per-table=1
+      - --max-allowed-packet=64M
+    environment:
+      MARIADB_DATABASE: moodle
+      MARIADB_USER: moodle
+      MARIADB_PASSWORD: demoMoodlePw2026
+      MARIADB_ROOT_PASSWORD: demoRootPw2026
+    volumes:
+      - mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Writes the self-signed certificates to ./certs on the first start, then
+  # exits. Later starts find them and do nothing.
+  certs:
+    image: alpine/openssl:latest
+    entrypoint: ["sh", "/make-certs.sh"]
+    volumes:
+      - ./opensearch/make-certs.sh:/make-certs.sh:ro
+      - ./certs:/certs
+
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0
+    environment:
+      # Our own opensearch.yml and users replace the image's demo setup.
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      bootstrap.memory_lock: "false"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - ./opensearch/opensearch.yml:/usr/share/opensearch/config/opensearch.yml:ro
+      - ./opensearch/internal_users.yml:/usr/share/opensearch/config/opensearch-security/internal_users.yml:ro
+      - ./certs:/usr/share/opensearch/config/certs:ro
+      - opensearch:/usr/share/opensearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf --cacert config/certs/root-ca.pem -u 'admin:DemoSearch2026!' https://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+
+  # Runs once, after OpenSearch answers: creates the role and the user the
+  # collector logs in with (step 7 of the talk, through the REST API).
+  opensearch-init:
+    image: opensearchproject/opensearch:3.8.0
+    entrypoint: ["bash", "/opensearch-init.sh"]
+    environment:
+      OPENSEARCH_ADMIN_PASSWORD: "DemoSearch2026!"
+      OTELCOL_PASSWORD: "DemoCollector2026!"
+    volumes:
+      - ./opensearch/opensearch-init.sh:/opensearch-init.sh:ro
+      - ./certs:/usr/share/opensearch/config/certs:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.8.0
+    volumes:
+      - ./opensearch/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml:ro
+      - ./certs:/usr/share/opensearch-dashboards/config/certs:ro
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  # Runs once, after Dashboards answers: loads the index pattern and the
+  # dashboard "Moodle events", so the events are on screen at the first login.
+  dashboards-init:
+    image: opensearchproject/opensearch:3.8.0
+    entrypoint: ["bash", "/dashboards-init.sh"]
+    environment:
+      OPENSEARCH_ADMIN_PASSWORD: "DemoSearch2026!"
+    volumes:
+      - ./opensearch/dashboards-init.sh:/dashboards-init.sh:ro
+      - ./opensearch/moodle-dashboard.ndjson:/moodle-dashboard.ndjson:ro
+      - ./certs:/usr/share/opensearch/config/certs:ro
+    depends_on:
+      opensearch-dashboards:
+        condition: service_started
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otelcol-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      opensearch-init:
+        condition: service_completed_successfully
+
+  # Runs once: fixes ownership of the data directory and installs the
+  # Moodle database if it is not installed yet. Then exits.
+  moodle-init:
+    <<: *moodle-image
+    command: ["bash", "/moodle-init.sh"]
+    environment:
+      <<: *otel-env
+    volumes:
+      - ./moodle-config.php:/var/www/html/config.php:ro
+      - ./moodle-init.sh:/moodle-init.sh:ro
+      - moodledata:/var/www/moodledata
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      otelcol:
+        condition: service_started
+
+  moodle:
+    <<: *moodle-image
+    environment:
+      <<: *otel-env
+      APACHE_DOCUMENT_ROOT: /var/www/html/public
+    volumes:
+      - ./moodle-config.php:/var/www/html/config.php:ro
+      - ./moodle/moodle-ssl.conf:/etc/apache2/sites-available/moodle-ssl.conf:ro
+      - ./moodle/enable-https.sh:/docker-entrypoint.d/enable-https.sh:ro
+      - ./certs:/certs:ro
+      - moodledata:/var/www/moodledata
+    ports:
+      - "127.0.0.1:443:443"
+    depends_on:
+      moodle-init:
+        condition: service_completed_successfully
+
+  # Moodle cron every minute, so scheduled-task traces exist too.
+  moodle-cron:
+    <<: *moodle-image
+    # Skips the image entrypoint: it writes php.ini files as root, and cron
+    # must run as www-data so the files it creates in moodledata stay readable.
+    entrypoint: ["bash", "-c", "cd /var/www/html && while true; do php admin/cli/cron.php; sleep 60; done"]
+    user: www-data
+    environment:
+      <<: *otel-env
+    volumes:
+      - ./moodle-config.php:/var/www/html/config.php:ro
+      - moodledata:/var/www/moodledata
+    depends_on:
+      moodle-init:
+        condition: service_completed_successfully
+
+volumes:
+  mariadb:
+  moodledata:
+  opensearch:

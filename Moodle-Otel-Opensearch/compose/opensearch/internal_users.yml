@@ -1,0 +1,27 @@
+# The password-login users that exist when OpenSearch starts for the first
+# time. Mounted over config/opensearch-security/internal_users.yml, so the
+# image's demo users (logstash, readall, ...) do not exist here.
+#
+# The hashes were made with plugins/opensearch-security/tools/hash.sh.
+# The plain-text passwords are in README.md, on purpose: this is a demo
+# stack bound to 127.0.0.1. Change both before using any of this elsewhere.
+#
+# The collector's own user, otelcol, is NOT here: opensearch-init.sh creates
+# it through the security REST API, the same way the talk tells you to do it
+# in the Dashboards Security screens.
+---
+_meta:
+  type: "internalusers"
+  config_version: 2
+
+admin:
+  hash: "$2y$12$fOaMLN5CBJXNkBkxhxWH5.hD0ukC6oUydkWuhn9qzjE13kCMPzYKS"
+  reserved: true
+  backend_roles:
+  - "admin"
+  description: "Administrator. Password: DemoSearch2026!"
+
+kibanaserver:
+  hash: "$2y$12$9jBKSNkKGvIuYhmxjfPe4uSY5hPAIibH65L0OHGHwc7Jh2K6cDTv2"
+  reserved: true
+  description: "The user OpenSearch Dashboards itself logs in with. Password: DemoDashboards2026!"

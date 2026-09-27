@@ -1,0 +1,58 @@
+# The OpenTelemetry Collector configuration from the talk (step 8).
+# Three words the OpenTelemetry Collector uses: receivers (where data comes
+# in), processors (what happens to it between the two), exporters (where it
+# goes out). Extensions are helpers the exporters use; here, the login.
+extensions:
+  basicauth/opensearch:                # the user opensearch-init.sh creates
+    client_auth:
+      username: otelcol
+      password: DemoCollector2026!
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+  # moodle-package-otel 1.0.1 sets http.response.status_code on the root span
+  # of a cron or CLI run from http_response_code(), which returns false outside
+  # a web request. OpenSearch has already mapped that field as a number from
+  # the first web request, so it rejects the cron root span. Drop the attribute
+  # when it is false; a CLI run has no HTTP status.
+  transform/cli-status:
+    trace_statements:
+      - delete_key(span.attributes, "http.response.status_code") where span.attributes["http.response.status_code"] == false
+
+exporters:
+  opensearch/moodle:
+    http:
+      endpoint: https://opensearch:9200
+      auth:
+        authenticator: basicauth/opensearch
+      tls:
+        insecure_skip_verify: true   # accept OpenSearch's self-signed certificate
+    logs_index: "otel-v1-logs-moodle"    # must start with otel-v1-logs, or the index template does not apply
+    logs_index_time_format: "yyyy.MM"    # one index per month
+    traces_index: "otel-v1-apm-span"     # NOT yours: the trace screens read this name
+    traces_index_time_format: "yyyy.MM"
+    mapping:
+      mode: "otel-v1"
+      manage_index_template: true
+  # Prints one line per batch, so `docker compose logs otelcol` shows arrivals.
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [basicauth/opensearch]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [opensearch/moodle, debug]
+    traces:
+      receivers: [otlp]
+      processors: [transform/cli-status, batch]
+      exporters: [opensearch/moodle, debug]

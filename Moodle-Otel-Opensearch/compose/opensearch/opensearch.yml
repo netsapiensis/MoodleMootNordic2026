@@ -1,0 +1,31 @@
+# OpenSearch node settings for the demo stack. Mounted over the image's
+# own config/opensearch.yml. The security plugin is ON: HTTPS on port 9200
+# with the self-signed certificates that the `certs` service generates, and
+# password login for every user.
+cluster.name: moodle-otel-demo
+network.host: 0.0.0.0
+discovery.type: single-node
+
+# Node-to-node traffic (one node here, but the plugin insists on the settings).
+plugins.security.ssl.transport.pemcert_filepath: certs/node.pem
+plugins.security.ssl.transport.pemkey_filepath: certs/node-key.pem
+plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem
+plugins.security.ssl.transport.enforce_hostname_verification: false
+
+# Client traffic on port 9200: HTTPS with the same certificate.
+plugins.security.ssl.http.enabled: true
+plugins.security.ssl.http.pemcert_filepath: certs/node.pem
+plugins.security.ssl.http.pemkey_filepath: certs/node-key.pem
+plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
+
+# Load the users and roles from config/opensearch-security/*.yml on the
+# first start. Later changes are made through the security REST API or
+# the Dashboards Security screens, never by editing those files again.
+plugins.security.allow_default_init_securityindex: true
+plugins.security.authcz.admin_dn: ['CN=admin,O=moodle-otel-demo']
+plugins.security.nodes_dn: ['CN=opensearch,O=moodle-otel-demo']
+plugins.security.audit.type: internal_opensearch
+plugins.security.enable_snapshot_restore_privilege: true
+plugins.security.check_snapshot_restore_write_privileges: true
+plugins.security.restapi.roles_enabled: [all_access, security_rest_api_access]
+plugins.security.system_indices.enabled: true

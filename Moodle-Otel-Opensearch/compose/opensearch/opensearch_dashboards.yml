@@ -1,0 +1,24 @@
+# OpenSearch Dashboards settings for the demo stack. Mounted over the
+# image's own config/opensearch_dashboards.yml.
+server.host: "0.0.0.0"
+
+# https on port 5601, with the same self-signed certificate as OpenSearch
+# (its subjectAltName includes localhost). The browser will warn once.
+server.ssl.enabled: true
+server.ssl.certificate: /usr/share/opensearch-dashboards/config/certs/node.pem
+server.ssl.key: /usr/share/opensearch-dashboards/config/certs/node-key.pem
+
+# How Dashboards reaches OpenSearch: https, verified against the private CA,
+# logged in as its own service user (see opensearch/internal_users.yml).
+opensearch.hosts: ["https://opensearch:9200"]
+opensearch.ssl.certificateAuthorities: ["/usr/share/opensearch-dashboards/config/certs/root-ca.pem"]
+opensearch.ssl.verificationMode: full
+opensearch.username: kibanaserver
+opensearch.password: DemoDashboards2026!
+opensearch.requestHeadersWhitelist: [authorization, securitytenant]
+
+# One shared space for saved objects, no private tenants: the dashboard that
+# dashboards-init loads is the one every user sees.
+opensearch_security.multitenancy.enabled: false
+opensearch_security.readonly_mode.roles: [kibana_read_only]
+opensearch_security.cookie.secure: true
