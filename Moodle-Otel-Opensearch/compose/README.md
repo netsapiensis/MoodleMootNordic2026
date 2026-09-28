@@ -46,9 +46,20 @@ and Moodle redirects any other host name.
    (curl asks for the password) — one `otel-v1-logs-moodle-*` index and one
    `otel-v1-apm-span-*` index.
 2. Log in to https://localhost:5601. The dashboard "Moodle events" opens at
-   once, with six charts of the last hour. `dashboards-init` loaded it at
-   the first start, with the index pattern `otel-v1-logs-*`. Log in and out of
-   Moodle, open a course, and try a wrong password; then press Refresh. Discover
+   once. It shows the last 30 minutes and refreshes itself every 10 seconds.
+   `dashboards-init` loaded it at the first start, with the index pattern
+   `otel-v1-logs-*`. It has five charts and one list:
+   - "Events over time": all events, one point per minute, 0 in quiet minutes.
+   - "Logins per minute: success and failure": two lines, one point per minute,
+     0 in the minutes with no login.
+   - "Totals": the number of events and of different users.
+   - "Usernames with the most failed logins": the usernames that were typed.
+   - "Event types": the ten most frequent event names.
+   - "Latest events": the newest events, with user ID and course ID.
+
+   Log in and out of Moodle, open a course, and type a wrong password ten
+   times. The failure line goes up to 10 in that minute, and each click shows
+   as a new row in "Latest events". Discover
    (menu → Discover) shows every event; try
    `attributes.event.data.eventname: *user_login_failed*`.
 3. Observability → Trace analytics → Traces: the span list. Click one for the
@@ -69,7 +80,7 @@ stack. The trace list and the waterfall do not need it.
 | `opensearch/opensearch-init.sh` | creates the `otelcol` user and the `otel_collector` role through the security REST API (step 7 of the talk, row one) |
 | `opensearch/opensearch_dashboards.yml` | Dashboards: https on 5601, talks to OpenSearch as `kibanaserver`, one shared space (no private tenants) |
 | `opensearch/dashboards-init.sh` | loads `moodle-dashboard.ndjson` into Dashboards once, and makes the dashboard the first page after login |
-| `opensearch/moodle-dashboard.ndjson` | the index pattern `otel-v1-logs-*`, six charts and the dashboard "Moodle events" |
+| `opensearch/moodle-dashboard.ndjson` | the index pattern `otel-v1-logs-*`, five charts, one saved search (the list "Latest events") and the dashboard "Moodle events" |
 | `opensearch/make-certs.sh` | writes the self-signed CA, node and admin certificates to `certs/` once |
 | `moodle-config.php` | Moodle's `config.php`, mounted read-only |
 | `moodle-init.sh` | installs the Moodle database once, marker file `.installed` in the data volume |

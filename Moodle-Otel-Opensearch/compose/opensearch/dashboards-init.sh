@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs once, after OpenSearch Dashboards answers: loads the index pattern
-# otel-v1-logs-* and the dashboard "Moodle events" with its six charts from
+# otel-v1-logs-* and the dashboard "Moodle events" with its five charts and one list from
 # moodle-dashboard.ndjson, makes the index pattern the default for Discover,
 # and makes the dashboard the first page after login. Nobody has to build
 # anything by hand. Safe to re-run: the import overwrites the same objects.
@@ -30,12 +30,12 @@ done
 api -X POST "$DASH/api/saved_objects/_import?overwrite=true" \
   -F file=@/moodle-dashboard.ndjson
 
-# Discover opens on the events, both pages show the last hour, and the first
+# Discover opens on the events, both pages show the last 30 minutes, and the first
 # page after login is the dashboard.
 api -X POST "$DASH/api/opensearch-dashboards/settings" \
   -H 'Content-Type: application/json' -d '{"changes": {
     "defaultIndex": "otel-v1-logs",
     "defaultRoute": "/app/dashboards#/view/moodle-events",
-    "timepicker:timeDefaults": "{\"from\": \"now-1h\", \"to\": \"now\"}"
+    "timepicker:timeDefaults": "{\"from\": \"now-30m\", \"to\": \"now\"}"
   }}'
 echo "dashboards-init: done"
